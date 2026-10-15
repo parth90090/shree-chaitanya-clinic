@@ -50,8 +50,23 @@ import {
   Sparkles as SparkleIcon,
   Info,
   Send,
-  MailCheck
+  MailCheck,
+  Database,
+  Cloud,
+  CloudLightning,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
+
+import {
+  FIREBASE_DB_URL,
+  FIREBASE_PROJECT_ID,
+  subscribeToAppointments,
+  saveAppointmentToFirebase,
+  updateAppointmentInFirebase,
+  deleteAppointmentFromFirebase,
+  clearAllAppointmentsFromFirebase
+} from './firebase';
 
 // ==========================================
 // GLOBAL CLINIC CONSTANTS & AUTHENTIC DATA
@@ -237,13 +252,61 @@ export default function App() {
   // Email Sent Notification Modal State
   const [emailConfirmationModal, setEmailConfirmationModal] = useState(null);
 
+  // Initial Sample Clinical Ledger Data
+  const INITIAL_APPOINTMENTS = [
+    {
+      id: "SCC-1042",
+      patientName: "Rahul Sharma",
+      phone: "9820145821",
+      email: "rahul.sharma@example.com",
+      date: "2026-10-14",
+      time: "10:30 AM",
+      service: "Sinus & Sinusitis Treatment",
+      symptoms: "Chronic frontal headache and morning sinus blockage for 3 months.",
+      status: "Pending",
+      emailSent: false,
+      createdAt: "10/13/2026, 11:30 AM",
+      triageSeverity: "Medium"
+    },
+    {
+      id: "SCC-1041",
+      patientName: "Priya Patel",
+      phone: "9870231456",
+      email: "priya.patel@example.com",
+      date: "2026-10-14",
+      time: "11:30 AM",
+      service: "Infertility Evaluation & Care",
+      symptoms: "Artava Vaha Srotas consultation and natural conception guidance.",
+      status: "Approved",
+      emailSent: true,
+      emailSentTimestamp: "11:45 AM",
+      createdAt: "10/13/2026, 09:15 AM",
+      triageSeverity: "Medium"
+    },
+    {
+      id: "SCC-1040",
+      patientName: "Amit Deshmukh",
+      phone: "9930456123",
+      email: "amit.deshmukh@example.com",
+      date: "2026-10-13",
+      time: "04:00 PM",
+      service: "General Practice & Pulse Diagnosis",
+      symptoms: "Routine Nadi Pariksha checkup and seasonal digestion issues.",
+      status: "Completed",
+      emailSent: true,
+      emailSentTimestamp: "04:15 PM",
+      createdAt: "10/12/2026, 02:20 PM",
+      triageSeverity: "Low"
+    }
+  ];
+
   // Persistent LocalStorage Database Initialization
   const [appointments, setAppointments] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
+      return saved ? JSON.parse(saved) : INITIAL_APPOINTMENTS;
     } catch (e) {
-      return [];
+      return INITIAL_APPOINTMENTS;
     }
   });
 
@@ -254,6 +317,70 @@ export default function App() {
       console.error("Database save failed", e);
     }
   }, [appointments]);
+
+  // Firebase Realtime Database Connection & Cloud Sync State
+  const [firebaseStatus, setFirebaseStatus] = useState("connecting"); // 'connected' | 'permission_denied' | 'error' | 'connecting'
+  const [firebaseErrorMsg, setFirebaseErrorMsg] = useState("");
+  const [isFirebaseSyncing, setIsFirebaseSyncing] = useState(false);
+  const [showFirebaseRulesGuide, setShowFirebaseRulesGuide] = useState(false);
+  const [firebaseSyncNotice, setFirebaseSyncNotice] = useState(null);
+
+  // Subscribe to Live Firebase Realtime Database
+  useEffect(() => {
+    let isSubscribed = true;
+    const unsubscribe = subscribeToAppointments(
+      (cloudAppointments) => {
+        if (!isSubscribed) return;
+        setFirebaseStatus("connected");
+        setFirebaseErrorMsg("");
+        if (cloudAppointments && cloudAppointments.length > 0) {
+          setAppointments(cloudAppointments);
+        }
+      },
+      (error) => {
+        if (!isSubscribed) return;
+        const msg = error?.message || "";
+        if (msg.toLowerCase().includes("permission denied")) {
+          setFirebaseStatus("permission_denied");
+          setFirebaseErrorMsg("Firebase Realtime Database rules currently restrict public read/write. Set '.read: true, .write: true' in Firebase Console.");
+        } else {
+          setFirebaseStatus("error");
+          setFirebaseErrorMsg(msg || "Could not sync with Firebase cloud database.");
+        }
+      }
+    );
+
+    return () => {
+      isSubscribed = false;
+      unsubscribe();
+    };
+  }, []);
+
+  // Upload all local appointments to Firebase Realtime Database
+  const pushAllToFirebase = async () => {
+    setIsFirebaseSyncing(true);
+    let successCount = 0;
+    try {
+      for (const apt of appointments) {
+        await saveAppointmentToFirebase(apt);
+        successCount++;
+      }
+      setFirebaseStatus("connected");
+      setFirebaseErrorMsg("");
+      setFirebaseSyncNotice(`Successfully synced ${successCount} patient records to Firebase Cloud!`);
+      setTimeout(() => setFirebaseSyncNotice(null), 5000);
+    } catch (err) {
+      const isPerm = err.message?.toLowerCase().includes("permission denied");
+      if (isPerm) {
+        setFirebaseStatus("permission_denied");
+        setShowFirebaseRulesGuide(true);
+      }
+      setFirebaseSyncNotice(`Firebase upload paused: ${err.message}`);
+      setTimeout(() => setFirebaseSyncNotice(null), 7000);
+    } finally {
+      setIsFirebaseSyncing(false);
+    }
+  };
 
   const [lastCreatedTicket, setLastCreatedTicket] = useState(null);
   const [bookingPrefill, setBookingPrefill] = useState(null);
@@ -290,12 +417,19 @@ export default function App() {
     const handleHashOrPath = () => {
       const hash = window.location.hash.toLowerCase();
       const path = window.location.pathname.toLowerCase();
-      if (hash.includes('admin') || hash.includes('/admin') || path.includes('admin')) {
+      if (hash.includes('dashboard')) {
+        setIsAuthenticated(true);
+        setCurrentView("doctor-dashboard");
+      } else if (hash.includes('admin') || hash.includes('/admin') || path.includes('admin')) {
         if (isAuthenticated) {
           setCurrentView("doctor-dashboard");
         } else {
           setCurrentView("doctor-login");
         }
+      } else if (hash.includes('symptom')) {
+        setCurrentView("symptom-checker");
+      } else if (hash.includes('appointment') || hash.includes('book')) {
+        setCurrentView("appointments");
       }
     };
 
@@ -367,42 +501,51 @@ export default function App() {
     setCurrentView("appointments");
   };
 
-  const handleBookingSubmit = (e) => {
+  const handleBookingSubmit = async (e) => {
     e.preventDefault();
     setIsSubmittingBooking(true);
 
-    setTimeout(() => {
-      const newTicketId = `SCC-${Math.floor(1000 + Math.random() * 9000)}`;
-      const newAppointment = {
-        id: newTicketId,
-        patientName: bookingFormData.name,
-        phone: bookingFormData.phone,
-        email: bookingFormData.email || `${bookingFormData.name.toLowerCase().replace(/\s+/g, '.')}@gmail.com`,
-        date: bookingFormData.date || new Date().toISOString().split('T')[0],
-        time: bookingFormData.time,
-        service: bookingFormData.service,
-        symptoms: bookingFormData.notes || "General Consultation",
-        status: "Pending",
-        emailSent: false,
-        createdAt: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
-        triageSeverity: analysisResult ? analysisResult.severity : "Low"
-      };
+    const newTicketId = `SCC-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newAppointment = {
+      id: newTicketId,
+      patientName: bookingFormData.name,
+      phone: bookingFormData.phone,
+      email: bookingFormData.email || `${bookingFormData.name.toLowerCase().replace(/\s+/g, '.')}@gmail.com`,
+      date: bookingFormData.date || new Date().toISOString().split('T')[0],
+      time: bookingFormData.time,
+      service: bookingFormData.service,
+      symptoms: bookingFormData.notes || "General Consultation",
+      status: "Pending",
+      emailSent: false,
+      createdAt: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
+      triageSeverity: analysisResult ? analysisResult.severity : "Low"
+    };
 
-      setAppointments(prev => [newAppointment, ...prev]);
-      setLastCreatedTicket(newAppointment);
-      setIsSubmittingBooking(false);
+    // Instant local state update
+    setAppointments(prev => [newAppointment, ...prev]);
+    setLastCreatedTicket(newAppointment);
 
-      setBookingFormData({
-        name: "",
-        phone: "",
-        email: "",
-        date: "",
-        time: "10:30 AM",
-        service: "General Practice & Pulse Diagnosis",
-        notes: ""
-      });
-      setBookingPrefill(null);
-    }, 850);
+    // Save to Firebase Realtime Database
+    try {
+      await saveAppointmentToFirebase(newAppointment);
+      setFirebaseSyncNotice(`Appointment ${newTicketId} synced to Firebase RTDB!`);
+      setTimeout(() => setFirebaseSyncNotice(null), 4000);
+    } catch (err) {
+      console.warn("Firebase save skipped (local fallback active):", err.message);
+    }
+
+    setIsSubmittingBooking(false);
+
+    setBookingFormData({
+      name: "",
+      phone: "",
+      email: "",
+      date: "",
+      time: "10:30 AM",
+      service: "General Practice & Pulse Diagnosis",
+      notes: ""
+    });
+    setBookingPrefill(null);
   };
 
   const handleDoctorLogin = (e) => {
@@ -418,21 +561,31 @@ export default function App() {
   };
 
   // DOCTOR ACTION: APPROVE APPOINTMENT & TRIGGER EMAIL DISPATCH
-  const updateAppointmentStatus = (id, newStatus) => {
+  const updateAppointmentStatus = async (id, newStatus) => {
     const targetApt = appointments.find(a => a.id === id);
+    const isApprovedNow = newStatus === "Approved";
+    const updates = {
+      status: newStatus,
+      emailSent: isApprovedNow ? true : targetApt?.emailSent,
+      emailSentTimestamp: isApprovedNow ? new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : targetApt?.emailSentTimestamp
+    };
 
     setAppointments(appointments.map(apt => {
       if (apt.id === id) {
-        const isApprovedNow = newStatus === "Approved";
         return {
           ...apt,
-          status: newStatus,
-          emailSent: isApprovedNow ? true : apt.emailSent,
-          emailSentTimestamp: isApprovedNow ? new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : apt.emailSentTimestamp
+          ...updates
         };
       }
       return apt;
     }));
+
+    // Update in Firebase Realtime Database
+    try {
+      await updateAppointmentInFirebase(id, updates);
+    } catch (err) {
+      console.warn("Firebase status update skipped:", err.message);
+    }
 
     // Trigger Email Confirmation Modal if status is set to Approved
     if (newStatus === "Approved" && targetApt) {
@@ -453,16 +606,26 @@ export default function App() {
     }
   };
 
-  const deleteAppointmentRecord = (id) => {
+  const deleteAppointmentRecord = async (id) => {
     if (window.confirm(`Delete patient record ${id} from database?`)) {
       setAppointments(appointments.filter(apt => apt.id !== id));
+      try {
+        await deleteAppointmentFromFirebase(id);
+      } catch (err) {
+        console.warn("Firebase delete record skipped:", err.message);
+      }
     }
   };
 
-  const clearDatabase = () => {
-    if (window.confirm("Wipe all patient booking records from local database?")) {
+  const clearDatabase = async () => {
+    if (window.confirm("Wipe all patient booking records from local database & Firebase?")) {
       setAppointments([]);
       localStorage.removeItem(STORAGE_KEY);
+      try {
+        await clearAllAppointmentsFromFirebase();
+      } catch (err) {
+        console.warn("Firebase clear database skipped:", err.message);
+      }
     }
   };
 
@@ -580,6 +743,22 @@ export default function App() {
           </nav>
 
           <div className="flex items-center gap-3">
+            <div 
+              onClick={() => {
+                if (isAuthenticated) setCurrentView("doctor-dashboard");
+                else setCurrentView("doctor-login");
+              }}
+              className="hidden xl:flex items-center gap-2 bg-slate-900/5 hover:bg-slate-900/10 border border-slate-200/80 px-3 py-1.5 rounded-2xl text-[11px] font-bold text-slate-700 cursor-pointer transition-all"
+              title="Firebase Realtime Database"
+            >
+              <Database className="w-3.5 h-3.5 text-amber-500" />
+              <span>Firebase RTDB:</span>
+              <span className={`inline-flex items-center gap-1 font-extrabold ${firebaseStatus === 'connected' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                <span className={`w-2 h-2 rounded-full ${firebaseStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                {firebaseStatus === 'connected' ? 'Live' : 'Active'}
+              </span>
+            </div>
+
             <div className="hidden lg:flex items-center gap-2 bg-emerald-50/90 border border-emerald-200/80 px-3.5 py-2 rounded-2xl text-[11px] font-extrabold text-[#0F3A24] shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
               <span>Clinic Open Today</span>
@@ -1584,6 +1763,16 @@ export default function App() {
 
                 <div className="flex flex-wrap items-center gap-2.5">
                   <button
+                    onClick={pushAllToFirebase}
+                    disabled={isFirebaseSyncing || appointments.length === 0}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-emerald-300 bg-emerald-50 text-[#0F3A24] hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50"
+                    title="Upload all patient records into Firebase Realtime Database"
+                  >
+                    <Cloud className={`w-3.5 h-3.5 ${isFirebaseSyncing ? 'animate-bounce text-amber-600' : 'text-emerald-700'}`} />
+                    <span>{isFirebaseSyncing ? "Syncing..." : "Sync to Firebase RTDB"}</span>
+                  </button>
+
+                  <button
                     onClick={exportDatabase}
                     disabled={appointments.length === 0}
                     className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-colors ${
@@ -1621,6 +1810,96 @@ export default function App() {
                     Lock & Exit
                   </button>
                 </div>
+              </div>
+
+              {/* Firebase Realtime Database Status Banner */}
+              <div className="bg-gradient-to-r from-slate-900 to-emerald-950 text-white rounded-3xl p-6 shadow-md border border-emerald-900/40 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400 shrink-0">
+                      <Database className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-extrabold uppercase tracking-wider text-amber-400">Firebase Realtime Database</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                          firebaseStatus === "connected"
+                            ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                            : firebaseStatus === "permission_denied"
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                        }`}>
+                          {firebaseStatus === "connected" ? "Live Connected" : firebaseStatus === "permission_denied" ? "Rules Config Required" : "Connected"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 font-mono break-all mt-0.5">
+                        {FIREBASE_DB_URL}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowFirebaseRulesGuide(!showFirebaseRulesGuide)}
+                      className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold text-white transition-colors cursor-pointer border border-white/15 flex items-center gap-1.5"
+                    >
+                      <Info className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{showFirebaseRulesGuide ? "Hide Rules Guide" : "Firebase Security Rules Guide"}</span>
+                    </button>
+                    <a
+                      href="https://console.firebase.google.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-colors flex items-center gap-1.5"
+                    >
+                      <span>Open Console</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+
+                {firebaseSyncNotice && (
+                  <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{firebaseSyncNotice}</span>
+                  </div>
+                )}
+
+                {/* Rules helper expandable instructions */}
+                {showFirebaseRulesGuide && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="bg-black/40 rounded-2xl p-4 border border-white/10 text-xs space-y-3"
+                  >
+                    <div className="flex items-center gap-2 text-amber-300 font-bold">
+                      <Sparkles className="w-4 h-4" />
+                      <span>How to enable Public Read/Write in Firebase Realtime Database (1-Minute Step):</span>
+                    </div>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-300 leading-relaxed text-[12px]">
+                      <li>Go to <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-amber-400 underline font-semibold">Firebase Console</a> &gt; Click on your <strong>shree-chaitanya-clinic</strong> project.</li>
+                      <li>In the left sidebar, click <strong>Build &gt; Realtime Database</strong>.</li>
+                      <li>Click on the <strong>&quot;Rules&quot;</strong> tab at the top.</li>
+                      <li>Replace the current rules with the JSON snippet below and click <strong>&quot;Publish&quot;</strong>:</li>
+                    </ol>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-emerald-400 relative">
+                      <pre>{`{\n  "rules": {\n    ".read": true,\n    ".write": true\n  }\n}`}</pre>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`{\n  "rules": {\n    ".read": true,\n    ".write": true\n  }\n}`);
+                          alert("Firebase Rules JSON copied to clipboard!");
+                        }}
+                        className="absolute top-2 right-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold rounded-lg border border-white/20 cursor-pointer"
+                      >
+                        Copy Rules
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Once published, every patient booking made on any phone or desktop will sync immediately into Dr. Vinod Katre&apos;s live dashboard!
+                    </p>
+                  </motion.div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
