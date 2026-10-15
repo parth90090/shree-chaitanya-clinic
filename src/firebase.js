@@ -73,20 +73,36 @@ export function subscribeToAppointments(onData, onError) {
 
 /**
  * Save a new appointment or overwrite an existing appointment record
+ * Uses Firebase SDK with automatic REST HTTPS fallback
  */
 export async function saveAppointmentToFirebase(appointment) {
   if (!appointment || !appointment.id) {
     throw new Error("Invalid appointment record: missing ID");
   }
   const cleanId = String(appointment.id).replace(/[.#$[\]/]/g, "_");
-  const appointmentRef = ref(db, `appointments/${cleanId}`);
-  
   const payload = {
     ...appointment,
     updatedAt: new Date().toISOString()
   };
 
-  await set(appointmentRef, payload);
+  try {
+    const appointmentRef = ref(db, `appointments/${cleanId}`);
+    await set(appointmentRef, payload);
+    return payload;
+  } catch (sdkError) {
+    console.warn("[Firebase RTDB] SDK save failed, utilizing REST API fallback:", sdkError.message);
+  }
+
+  // REST API HTTPS fallback
+  const restUrl = `${FIREBASE_DB_URL}/appointments/${cleanId}.json`;
+  const res = await fetch(restUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to save to Firebase RTDB: HTTP ${res.status}`);
+  }
   return payload;
 }
 
@@ -96,14 +112,25 @@ export async function saveAppointmentToFirebase(appointment) {
 export async function updateAppointmentInFirebase(id, updates) {
   if (!id) return;
   const cleanId = String(id).replace(/[.#$[\]/]/g, "_");
-  const appointmentRef = ref(db, `appointments/${cleanId}`);
-  
   const payload = {
     ...updates,
     updatedAt: new Date().toISOString()
   };
 
-  await update(appointmentRef, payload);
+  try {
+    const appointmentRef = ref(db, `appointments/${cleanId}`);
+    await update(appointmentRef, payload);
+    return payload;
+  } catch (err) {
+    console.warn("[Firebase RTDB] SDK update failed, using REST fallback:", err.message);
+  }
+
+  const restUrl = `${FIREBASE_DB_URL}/appointments/${cleanId}.json`;
+  await fetch(restUrl, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
   return payload;
 }
 
@@ -113,16 +140,30 @@ export async function updateAppointmentInFirebase(id, updates) {
 export async function deleteAppointmentFromFirebase(id) {
   if (!id) return;
   const cleanId = String(id).replace(/[.#$[\]/]/g, "_");
-  const appointmentRef = ref(db, `appointments/${cleanId}`);
-  await remove(appointmentRef);
+  try {
+    const appointmentRef = ref(db, `appointments/${cleanId}`);
+    await remove(appointmentRef);
+    return;
+  } catch (err) {
+    console.warn("[Firebase RTDB] SDK delete failed, using REST fallback:", err.message);
+  }
+  const restUrl = `${FIREBASE_DB_URL}/appointments/${cleanId}.json`;
+  await fetch(restUrl, { method: "DELETE" });
 }
 
 /**
  * Clear all appointments from Firebase Realtime Database
  */
 export async function clearAllAppointmentsFromFirebase() {
-  const appointmentsRef = ref(db, "appointments");
-  await set(appointmentsRef, null);
+  try {
+    const appointmentsRef = ref(db, "appointments");
+    await set(appointmentsRef, null);
+    return;
+  } catch (err) {
+    console.warn("[Firebase RTDB] SDK clear failed, using REST fallback:", err.message);
+  }
+  const restUrl = `${FIREBASE_DB_URL}/appointments.json`;
+  await fetch(restUrl, { method: "DELETE" });
 }
 
 /**
