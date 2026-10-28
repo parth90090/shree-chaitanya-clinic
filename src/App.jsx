@@ -743,22 +743,6 @@ export default function App() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <div 
-              onClick={() => {
-                if (isAuthenticated) setCurrentView("doctor-dashboard");
-                else setCurrentView("doctor-login");
-              }}
-              className="hidden xl:flex items-center gap-2 bg-slate-900/5 hover:bg-slate-900/10 border border-slate-200/80 px-3 py-1.5 rounded-2xl text-[11px] font-bold text-slate-700 cursor-pointer transition-all"
-              title="Firebase Realtime Database"
-            >
-              <Database className="w-3.5 h-3.5 text-amber-500" />
-              <span>Firebase RTDB:</span>
-              <span className={`inline-flex items-center gap-1 font-extrabold ${firebaseStatus === 'connected' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                <span className={`w-2 h-2 rounded-full ${firebaseStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                {firebaseStatus === 'connected' ? 'Live' : 'Active'}
-              </span>
-            </div>
-
             <div className="hidden lg:flex items-center gap-2 bg-emerald-50/90 border border-emerald-200/80 px-3.5 py-2 rounded-2xl text-[11px] font-extrabold text-[#0F3A24] shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
               <span>Clinic Open Today</span>
@@ -1716,12 +1700,6 @@ export default function App() {
                     <span>Authorize & Open Console</span>
                   </button>
                 </form>
-
-                <div className="pt-4 border-t border-slate-100">
-                  <p className="text-[11px] text-slate-400">
-                    Clinic Passcode: <span className="font-mono font-bold text-slate-600">9090</span>
-                  </p>
-                </div>
               </div>
             </motion.div>
           )}
